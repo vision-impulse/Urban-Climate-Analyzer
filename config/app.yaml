@@ -1,0 +1,14 @@
+data_sources:
+  dwd_url_recent_data: "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/daily/kl/recent/"
+  dwd_url_historical_data: "https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/daily/kl/historical/"
+  dataset_url_clc: "https://daten.gdz.bkg.bund.de/produkte/dlm/clc5_2018/aktuell/clc5_2018.utm32s.shape.zip"
+  dataset_url_dgl: "https://www.opengeodata.nrw.de/produkte/umwelt_klima/bodennutzung/landwirtschaft/DGL_EPSG25832_Shape.zip"
+thresholds:
+  date_filter:
+    max_windspeed: 2.6
+    min_temperature: 25.0
+  satellite_filter:
+    max_cloud_coverage: 25
+  historical_processing:     
+    starting_year_from: "01.01.2023"
+output_data_dir: "./../data/"

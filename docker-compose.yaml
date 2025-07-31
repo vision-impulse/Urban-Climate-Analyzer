@@ -1,0 +1,62 @@
+# Copyright (c) 2025 Vision Impulse GmbH
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Authors: Benjamin Bischke
+
+services:
+
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.26.2
+    container_name: uca_geoserver
+    hostname: geoserver
+    ports:   # BB: only for local testing, for production use 'expose'!
+      - "${GEOSERVER_PORT}:${GEOSERVER_PORT}"
+    environment:
+      - EXTRA_JAVA_OPTS=-Xms8G -Xmx16G
+      - CORS_ENABLED=true
+      - INITIAL_MEMORY=8G
+      - MAXIMUM_MEMORY=16G
+      - CORS_ALLOWED_ORIGINS=*
+      - CORS_ALLOWED_METHODS=GET,POST,PUT,HEAD,OPTIONS
+      - SKIP_DEMO_DATA=true
+      - GEOSERVER_DATA_DIR=/var/geoserver_data
+      - GEOSERVER_ADMIN_PASSWORD=${GEOSERVER_ADMIN_PASSWORD}
+      - GEOSERVER_ADMIN_USER=${GEOSERVER_ADMIN_USER}
+    volumes:
+      - ./data:/data
+      - ./data/components/geoserver/geoserver_data:/var/geoserver_data
+      - ./config/geoserver_styles/arrow.svg:/var/geoserver_data/styles/icons/arrow.svg
+      - ./data/components/geoserver/additional_libs:/opt/additional_libs:Z 
+    networks:
+      - ucanet
+
+  climate_analysis:
+    build:
+      context: .
+    container_name: climate_analysis
+    command: ["python", "main.py", "--help"] 
+    hostname: climate_analysis
+    volumes:
+      - ./config:/config
+      - ./data:/data
+    depends_on:
+      - geoserver
+    networks:
+      - ucanet
+    env_file:
+      - .env      
+
+networks:
+  ucanet:

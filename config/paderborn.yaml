@@ -1,0 +1,8 @@
+aoi:
+  city_name: "Paderborn"
+  polygon_buffer_in_meter: 8000
+data_sources:
+  dwd_weatherstation_filename_recent: "tageswerte_KL_03028_akt.zip"
+  dwd_weatherstation_filename_historical: "tageswerte_KL_03028_19510101_20241231_hist.zip"
+  local_dem_data_dirs: 
+    - "./../data/external/dgm"

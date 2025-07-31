@@ -1,0 +1,176 @@
+# Copyright (c) 2025 Vision Impulse GmbH
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Authors: Benjamin Bischke
+
+import os
+import logging
+import pandas as pd
+import requests
+import utils.date_utils as util
+import geopandas as gpd
+import pyproj
+import shutil
+
+from enum import Enum
+from typing import Any, Union
+from urllib.parse import urljoin
+from shapely.geometry import box
+from shapely.ops import unary_union
+from api.osm_downloader import OSMDownloader
+from api.resource_downloader import ZipDatasetDownloader
+from workflows.workflow_base import BaseWorkflow
+
+logger = logging.getLogger("cold_air_workflow")
+
+
+class ColdAirZoneWorkflow(BaseWorkflow):
+
+    RESULT_FILENAME = "cold_air_zones.gpkg"
+
+    def __init__(self, path_config, city, bbox_4326, dataset_url_dgl, dataset_url_clc):
+
+        super(ColdAirZoneWorkflow, self).__init__(city, bbox_4326, "cold_air_zones")
+        self.dataset_url_dgl = dataset_url_dgl
+        self.dataset_url_clc = dataset_url_clc
+        self.city = city
+        self.datasets_dir = path_config.datasets
+        self.processing_dir = path_config.processing
+        self.results_dir = path_config.results
+        self.wflow_name = "cold_air_zones"
+        self.osm_file = os.path.join(self.datasets_dir, "osm", "osm_polygons.geojson")
+        self.dgl_file = os.path.join(path_config.datasets, "dgl", "V_OD_DGL.shp")
+        self.clc2_file = os.path.join(
+            self.datasets_dir,
+            "clc",
+            "clc5_2018.utm32s.shape",
+            "clc5",
+            "clc5_class2xx.shp",
+        )
+        self.clc3_file = os.path.join(
+            self.datasets_dir,
+            "clc",
+            "clc5_2018.utm32s.shape",
+            "clc5",
+            "clc5_class3xx.shp",
+        )
+        self.result_workflow = os.path.join(
+            path_config.results, self.city, self.workflow_name
+        )
+        self.processing_worklfow = os.path.join(
+            path_config.processing, self.city, self.workflow_name
+        )
+        self._ensure_dir(self.result_workflow)
+        self._ensure_dir(self.processing_worklfow)
+        self.bbox_gdf = self._bbox_df_from_bounds(self.bbox)
+
+    def run(self, override=False):
+        try:
+            self._ensure_datasets()
+            self._run_cold_air_zone_detection()
+            self._copy_from_processing_to_result_dir()
+        except Exception as e:
+            logger.error("Error computing cold air zones: %s", e)
+            pass
+
+    # --------------------------------------------------------------------
+    def _ensure_datasets(self):
+        if os.path.exists(self.osm_file):
+            logger.info("✔ OSM Dataset already exists at %s", self.osm_file)
+        else:
+            logger.info("OSM dataset not found. Downloading...")
+            downloader = OSMDownloader(self.bbox, self.osm_file)
+            downloader.run()
+
+        if os.path.exists(self.dgl_file):
+            logger.info("✔ DGL Dataset already exists at %s", self.dgl_file)
+        else:
+            logger.info("DGL dataset not found. Downloading...")
+            downloader = ZipDatasetDownloader(
+                self.dataset_url_dgl,
+                self.datasets_dir,
+                "dgl",
+                "DGL_EPSG25832_Shape.zip",
+            )
+            downloader.run()
+
+        if os.path.exists(self.clc2_file) and os.path.exists(self.clc3_file):
+            logger.info("✔ CLC Dataset already exists at %s", self.clc2_file)
+        else:
+            downloader = ZipDatasetDownloader(
+                self.dataset_url_clc,
+                self.datasets_dir,
+                "clc",
+                "clc5_2018.utm32s.shape.zip",
+            )
+            downloader.run()
+
+    def _run_cold_air_zone_detection(self, override=False):
+        output_path = os.path.join(
+            self.processing_dir, self.city, self.wflow_name, self.RESULT_FILENAME
+        )
+        if os.path.exists(output_path) and not override:
+            logger.info("Cold air zones already computed, skipping computation")
+            return
+        self._extract_and_merge_cold_air_zones_from_lulc_maps(output_path)
+
+    def _extract_and_merge_cold_air_zones_from_lulc_maps(self, output_path):
+        # CLC Classes starting with 2 in Taxonomy
+        gdf_clc_2 = gpd.read_file(self.clc2_file)
+        gdf_clc_2 = gpd.clip(gdf_clc_2, self.bbox_gdf)
+        gdf_clc_2 = gdf_clc_2[gdf_clc_2["CLC18"].isin(["211", "231"])]
+
+        # CLC Classes starting with 3 in Taxonomy
+        gdf_clc_3 = gpd.read_file(self.clc3_file)
+        gdf_clc_3 = gpd.clip(gdf_clc_3, self.bbox_gdf)
+        gdf_clc_3 = gdf_clc_3[(gdf_clc_3["CLC18"] == "321")]
+
+        # Open Street Map
+        gdf_osm = gpd.read_file(self.osm_file)
+        gdf_osm = gdf_osm.to_crs(epsg=25832)
+        gdf_osm = gpd.clip(gdf_osm, self.bbox_gdf)
+        gdf_osm = gdf_osm[["geometry"]]
+
+        # Dauergruenland 
+        gdf_dgl = gpd.read_file(self.dgl_file)
+        gdf_dgl = gpd.clip(gdf_dgl, self.bbox_gdf)
+        dfs = [gdf_clc_2, gdf_clc_3, gdf_osm, gdf_dgl]
+
+        merged_df = gpd.GeoDataFrame(
+            pd.concat(dfs, ignore_index=True), crs="EPSG:25832"
+        )
+        union_geom = unary_union(merged_df.geometry)
+        union_gdf = gpd.GeoDataFrame(geometry=[union_geom], crs=merged_df.crs)
+        union_gdf_4326 = union_gdf.to_crs(epsg=4326)
+        union_gdf_4326.to_file(output_path, layer="cold_area_zones", driver="GPKG")
+
+    def _copy_from_processing_to_result_dir(self):
+        src_path = os.path.join(
+            self.processing_dir, self.city, self.wflow_name, self.RESULT_FILENAME
+        )
+        dst_path = os.path.join(
+            self.results_dir, self.city, self.wflow_name, self.RESULT_FILENAME
+        )
+        if not os.path.exists(
+            os.path.join(self.results_dir, self.city, self.wflow_name)
+        ):
+            os.makedirs(os.path.join(self.results_dir, self.city, self.wflow_name))
+        shutil.copyfile(src_path, dst_path)
+
+    def _bbox_df_from_bounds(self, bbox_bounds_4326):
+        bbox_geom = box(*bbox_bounds_4326)
+        bbox_gdf = gpd.GeoDataFrame(geometry=[bbox_geom], crs="EPSG:4326")
+        bbox_gdf = bbox_gdf.to_crs(epsg=25832)
+        return bbox_gdf
