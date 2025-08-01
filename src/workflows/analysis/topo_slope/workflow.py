@@ -36,15 +36,23 @@ logger = logging.getLogger("topo_slope_workflow")
 
 class SlopeExtractionWorkflow(BaseWorkflow):
 
-    def __init__(self, path_config, city, bbox, dem_folder, dem_scale_factor=1.0):
+    def __init__(
+        self, path_config, city, bbox, dem_folder, override_files, dem_scale_factor=1.0
+    ):
 
         super(SlopeExtractionWorkflow, self).__init__(city, bbox, "slope")
         self.dem_folder = dem_folder
         self.dem_scale_factor = dem_scale_factor
         self.path_config = path_config
+        self.override_files = override_files
         self.processing_dir = path_config.processing
         self.city = city
         self.wflow_name = "slope"
+        self.process_wflow_folder = os.path.join(
+            self.processing_dir,
+            self.city,
+            self.wflow_name
+        )
         self.slope_raster_dir = os.path.join(
             self.processing_dir,
             self.city,
@@ -52,6 +60,9 @@ class SlopeExtractionWorkflow(BaseWorkflow):
             os.path.basename(self.dem_folder),
             "single_raster_files",
         )
+        if self.override_files:
+            self._remove_dir(self.process_wflow_folder)
+            self._ensure_dir(self.process_wflow_folder)
         self._ensure_dir(self.slope_raster_dir)
 
     def run(self):

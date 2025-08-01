@@ -16,6 +16,7 @@
 # Authors: Benjamin Bischke
 
 import os
+import shutil
 
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -34,3 +35,7 @@ class BaseWorkflow(ABC):
 
     def _ensure_dir(self, path):
         os.makedirs(path, exist_ok=True)
+
+    def _remove_dir(self, dir_path):
+        if os.path.exists(dir_path) and os.path.isdir(dir_path):
+            shutil.rmtree(dir_path)

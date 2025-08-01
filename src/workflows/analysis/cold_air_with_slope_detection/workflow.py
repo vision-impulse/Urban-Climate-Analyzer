@@ -63,7 +63,8 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
         dataset_url_dgl,
         dataset_url_clc,
         dem_folder,
-        dem_scale_factor=1.0,
+        override_files,
+        dem_scale_factor,
     ):
         super(ColdAirZoneWithSlopeWorkflow, self).__init__(
             city, bbox, "cold_air_zones_with_slope"
@@ -75,12 +76,19 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
         self.dataset_url_dgl = dataset_url_dgl
         self.dataset_url_clc = dataset_url_clc
         self.dem_folder = dem_folder
+        self.override_files = override_files
         self.dem_scale_factor = dem_scale_factor
         self.slope_degree_threshold = 2.0
         self.slope_simplify_tolerance = 0
         self.slope_min_area = 1
         self.dem_foldername = os.path.basename(self.dem_folder)
         self.wflow_name = "cold_air_zones_with_slope"
+
+        self.process_wflow_folder = os.path.join(
+            self.processing_dir,
+            self.city,
+            self.wflow_name
+        )
 
         # input from slope workflow
         self.slope_raster_file_dir = os.path.join(
@@ -109,6 +117,9 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
             self.dem_foldername,
             "merged_files",
         )
+        if self.override_files:
+            self._remove_dir(self.process_wflow_folder)
+            self._ensure_dir(self.process_wflow_folder)
         self._ensure_dir(self.slope_vector_files_dir)
         self._ensure_dir(self.merged_vector_files_dir)
 
@@ -125,6 +136,7 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
             self.bbox,
             self.dataset_url_dgl,
             self.dataset_url_clc,
+            self.override_files,
         )
         workflow_air_zone_analysis.run()
         workflow_slope_analysis = SlopeExtractionWorkflow(
@@ -132,10 +144,11 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
             self.city,
             self.bbox,
             self.dem_folder,
+            self.override_files,
             dem_scale_factor=self.dem_scale_factor,
         )
         workflow_slope_analysis.run()
-        # self._extract_slope_mask_for_files()
+        self._extract_slope_mask_for_files()
         self._merge_vector_files_for_dataset()
 
     # -------------------------------------------------------------------------------------------------------#

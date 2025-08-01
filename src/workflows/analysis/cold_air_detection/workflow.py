@@ -40,12 +40,21 @@ class ColdAirZoneWorkflow(BaseWorkflow):
 
     RESULT_FILENAME = "cold_air_zones.gpkg"
 
-    def __init__(self, path_config, city, bbox_4326, dataset_url_dgl, dataset_url_clc):
+    def __init__(
+        self,
+        path_config,
+        city,
+        bbox_4326,
+        dataset_url_dgl,
+        dataset_url_clc,
+        override_files,
+    ):
 
         super(ColdAirZoneWorkflow, self).__init__(city, bbox_4326, "cold_air_zones")
+        self.city = city
         self.dataset_url_dgl = dataset_url_dgl
         self.dataset_url_clc = dataset_url_clc
-        self.city = city
+        self.override_files = override_files
         self.datasets_dir = path_config.datasets
         self.processing_dir = path_config.processing
         self.results_dir = path_config.results
@@ -76,7 +85,7 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         self._ensure_dir(self.processing_worklfow)
         self.bbox_gdf = self._bbox_df_from_bounds(self.bbox)
 
-    def run(self, override=False):
+    def run(self):
         try:
             self._ensure_datasets()
             self._run_cold_air_zone_detection()
@@ -117,11 +126,11 @@ class ColdAirZoneWorkflow(BaseWorkflow):
             )
             downloader.run()
 
-    def _run_cold_air_zone_detection(self, override=False):
+    def _run_cold_air_zone_detection(self):
         output_path = os.path.join(
             self.processing_dir, self.city, self.wflow_name, self.RESULT_FILENAME
         )
-        if os.path.exists(output_path) and not override:
+        if os.path.exists(output_path) and not self.override_files:
             logger.info("Cold air zones already computed, skipping computation")
             return
         self._extract_and_merge_cold_air_zones_from_lulc_maps(output_path)
@@ -143,7 +152,7 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         gdf_osm = gpd.clip(gdf_osm, self.bbox_gdf)
         gdf_osm = gdf_osm[["geometry"]]
 
-        # Dauergruenland 
+        # Dauergruenland
         gdf_dgl = gpd.read_file(self.dgl_file)
         gdf_dgl = gpd.clip(gdf_dgl, self.bbox_gdf)
         dfs = [gdf_clc_2, gdf_clc_3, gdf_osm, gdf_dgl]

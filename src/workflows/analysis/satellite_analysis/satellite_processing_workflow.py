@@ -19,7 +19,7 @@ import os
 import rasterio
 import numpy as np
 import logging
-
+import shutil
 
 from workflows.analysis.satellite_analysis.satellite_processor import (
     SatelliteImageProcessor,
@@ -45,10 +45,11 @@ logger = logging.getLogger("satellite_workflow")
 class SatelliteWorkflow:
 
     def __init__(
-        self, path_config, city, satellite_type, bbox, strategy, indices, file_suffix
+        self, path_config, city, satellite_type, bbox, strategy, indices, override_files, file_suffix
     ):
         self.city = city
         self.path_config = path_config
+        self.override_files = override_files
         self.satellite_download_dir = (
             path_config.sentinel_dir
             if satellite_type == "sentinel"
@@ -62,6 +63,7 @@ class SatelliteWorkflow:
         self.downloaded_date_folders = os.listdir(self.satellite_download_dir)
         self.processing_dir = self.path_config.processing
         self.result_dir = self.path_config.results
+        self._cleanup_folders_for_override()
 
     def run(self):
         self._merge_response_tiles_and_compute_indices()
@@ -158,11 +160,21 @@ class SatelliteWorkflow:
                 build_pyramid(result_filepath)
 
     # ---------------------------------------------------------------------------------------------------- #
+    def _cleanup_folders_for_override(self):
+        # Note: Satellite image folder (satellite_images) should never change - raw data is always the same.
+        for index in self.indices:
+            base_dir = self._get_index_base_dir(index)
+            self._remove_dir(base_dir)
 
     def _filepath_for_index_and_date(self, index, date):
         index_timestep_dir = self._processing_folder_for_indices_timesteps(index)
         out_filepath = os.path.join(index_timestep_dir, f"{index}_{date}.tiff")
         return out_filepath
+
+    def _get_all_processed_files_for_index(self, index):
+        pattern = os.path.join(self._get_index_base_dir(index), "**", "*.tiff")
+        files_for_index = sorted(glob(pattern, recursive=True))
+        return files_for_index
 
     def _processing_folder_for_date_images(self, date_folder):
         dir = os.path.join(
@@ -174,12 +186,7 @@ class SatelliteWorkflow:
         )
         self._ensure_dir(dir)
         return dir
-
-    def _get_all_processed_files_for_index(self, index):
-        pattern = os.path.join(self._get_index_base_dir(index), "**", "*.tiff")
-        files_for_index = sorted(glob(pattern, recursive=True))
-        return files_for_index
-
+    
     def _processing_folder_for_indices_timesteps(self, index):
         dir = os.path.join(self._get_index_base_dir(index), "timesteps")
         self._ensure_dir(dir)
@@ -198,11 +205,15 @@ class SatelliteWorkflow:
     def _ensure_dir(self, dir):
         if not os.path.exists(dir):
             os.makedirs(dir)
+    
+    def _remove_dir(self, dir_path):
+        if os.path.exists(dir_path) and os.path.isdir(dir_path):
+            shutil.rmtree(dir_path)
 
 
 class VegetationIndicesProcessingWorkflow(SatelliteWorkflow):
 
-    def __init__(self, path_config, city, bbox):
+    def __init__(self, path_config, city, bbox, override_files):
         strategy = SentinelProcessor(S2_EVALSCRIPT_FILE)
         indices = [strategy.NDVI, strategy.NDMI]
         super(VegetationIndicesProcessingWorkflow, self).__init__(
@@ -212,21 +223,23 @@ class VegetationIndicesProcessingWorkflow(SatelliteWorkflow):
             bbox,
             strategy,
             indices,
+            override_files,
             file_suffix="/*sentinel_response.tiff",
         )
 
 
 class LandSurfaceTemperaturProcessingWorkflow(SatelliteWorkflow):
 
-    def __init__(self, path_config, city, bbox):
-
+    def __init__(self, path_config, city, bbox, override_files):
         strategy = LandsatProcessor(L8_EVALSCRIPT_FILE)
+        indices = [strategy.LST]
         super(LandSurfaceTemperaturProcessingWorkflow, self).__init__(
             path_config,
             city,
             "landsat",
             bbox,
             strategy,
-            indices=[strategy.LST],
+            indices,
+            override_files,
             file_suffix="/*landsat_response.tiff",
         )

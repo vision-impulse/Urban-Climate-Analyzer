@@ -41,6 +41,7 @@ class FlowDirectionWorkflow(BaseWorkflow):
         bbox,
         dem_folder,
         dem_scale_factor,
+        override_files,
         gsd_grids_in_meter=None,
     ):
         super(FlowDirectionWorkflow, self).__init__(city, bbox, "flow_direction")
@@ -48,16 +49,20 @@ class FlowDirectionWorkflow(BaseWorkflow):
         self.path_config = path_config
         self.city = city
         self.dem_scale_factor = dem_scale_factor
+        self.override_files = override_files
         self.gsd_grids_in_meter = gsd_grids_in_meter or [50, 100]
-        self.num_processes = cpu_count()
         self.dem_folder = dem_folder
         self.dem_filename = os.path.basename(self.dem_folder)
         self.processing_folder = path_config.processing
         self.wflow_name = "flow_direction"
+        self.process_wflow_folder = os.path.join(
+            self.processing_folder,
+            self.city,
+            self.wflow_name
+        )
 
         # Result dir
         self.result_dir = os.path.join(path_config.results, self.city, self.wflow_name)
-        self._ensure_dir(self.result_dir)
 
         # Temp dirs for local processing
         self.processing_raster_dir = os.path.join(
@@ -81,15 +86,22 @@ class FlowDirectionWorkflow(BaseWorkflow):
             self.dem_filename,
             "merged_files",
         )
-        self._ensure_dir(self.processing_raster_dir)
-        self._ensure_dir(self.processing_vector_dir)
-        self._ensure_dir(self.processing_merge_dir)
+        self._setup_workflow_dirs()
 
     def run(self):
         self._extract_flow_direction_for_dem_files()
         self._aggregate_raster_directions_to_vector_grid()
         self._merge_vector_files_for_dataset()
         self._crop_by_bbox_and_copy_gpkg()
+
+    def _setup_workflow_dirs(self):
+        self._ensure_dir(self.result_dir)
+        if self.override_files:
+            self._remove_dir(self.process_wflow_folder)
+            self._ensure_dir(self.process_wflow_folder)
+        self._ensure_dir(self.processing_raster_dir)
+        self._ensure_dir(self.processing_vector_dir)
+        self._ensure_dir(self.processing_merge_dir)
 
     def _extract_flow_direction_for_dem_files(self):
         logger.info(

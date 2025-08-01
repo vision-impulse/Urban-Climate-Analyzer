@@ -166,6 +166,7 @@ class WorkflowRunner:
             "path_config": self.path_config,
             "city": self.city_name,
             "bbox": self.bbox,
+            "override_files": self.override_files,
         }
 
     def _get_cold_air_args(self):
@@ -175,6 +176,8 @@ class WorkflowRunner:
             "bbox_4326": self.bbox,
             "dataset_url_clc": self.app_config["data_sources"]["dataset_url_clc"],
             "dataset_url_dgl": self.app_config["data_sources"]["dataset_url_dgl"],
+            "override_files": self.override_files,
+            
         }
 
     def _get_cold_air_with_slope_args(self, dem_folder):
@@ -185,6 +188,7 @@ class WorkflowRunner:
             "dataset_url_clc": self.app_config["data_sources"]["dataset_url_clc"],
             "dataset_url_dgl": self.app_config["data_sources"]["dataset_url_dgl"],
             "dem_folder": dem_folder,
+            "override_files": self.override_files,
             "dem_scale_factor": 1.0,
         }
 
@@ -195,4 +199,5 @@ class WorkflowRunner:
             "bbox": self.bbox,
             "dem_folder": dem_folder,
             "dem_scale_factor": 1.0,
+            "override_files": self.override_files,
         }
