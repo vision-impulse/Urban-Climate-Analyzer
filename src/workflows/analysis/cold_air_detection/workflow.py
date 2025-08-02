@@ -78,16 +78,20 @@ class ColdAirZoneWorkflow(BaseWorkflow):
     # --------------------------------------------------------------------
     def _ensure_datasets(self):
         if os.path.exists(self.osm_file):
-            logger.info("✔ OSM Dataset already exists at %s", self.osm_file)
+            logger.info(
+                "✔ Required dataset OSM already downloaded (%s).", self.osm_file
+            )
         else:
-            logger.info("OSM dataset not found. Downloading...")
+            logger.info("Required dataset OSM not found. Downloading...")
             downloader = OSMDownloader(self.bbox, self.osm_file)
             downloader.run()
 
         if os.path.exists(self.dgl_file):
-            logger.info("✔ DGL Dataset already exists at %s", self.dgl_file)
+            logger.info(
+                "✔ Required dataset DGL already downloaded (%s).", self.dgl_file
+            )
         else:
-            logger.info("DGL dataset not found. Downloading...")
+            logger.info("Required dataset DGL not found. Downloading...")
             downloader = ZipDatasetDownloader(
                 self.dataset_url_dgl,
                 self.datasets_dir,
@@ -97,8 +101,11 @@ class ColdAirZoneWorkflow(BaseWorkflow):
             downloader.run()
 
         if os.path.exists(self.clc2_file) and os.path.exists(self.clc3_file):
-            logger.info("✔ CLC Dataset already exists at %s", self.clc2_file)
+            logger.info(
+                "✔ Required dataset CLC already downloaded (%s).", self.clc2_file
+            )
         else:
+            logger.info("Required dataset CLC not found. Downloading...")
             downloader = ZipDatasetDownloader(
                 self.dataset_url_clc,
                 self.datasets_dir,
@@ -110,7 +117,10 @@ class ColdAirZoneWorkflow(BaseWorkflow):
     def _run_cold_air_zone_detection(self):
         output_path = os.path.join(self.processing_workflow_dir, self.RESULT_FILENAME)
         if os.path.exists(output_path) and not self.override_files:
-            logger.info("Cold air zones already computed, skipping computation")
+            logger.info(
+                "Cold air zones have already been computed for the requested AOI "
+                "(bbox/cityname); skipping processing." 
+            )
             return
         self._extract_and_merge_cold_air_zones_from_lulc_maps(output_path)
 
@@ -134,11 +144,18 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         # Dauergruenland
         gdf_dgl = gpd.read_file(self.dgl_file)
         gdf_dgl = gpd.clip(gdf_dgl, self.bbox_gdf)
-        dfs = [gdf_clc_2, gdf_clc_3, gdf_osm, gdf_dgl]
 
-        merged_df = gpd.GeoDataFrame(
-            pd.concat(dfs, ignore_index=True), crs="EPSG:25832"
-        )
+        dfs = [gdf_clc_2, gdf_clc_3, gdf_osm]
+        if gdf_dgl.empty:
+            logger.warning(
+                "AOI (bbox / cityname) lies outside of the dataset 'Dauergrünland (NRW)'; "
+                "The dataset will be skipped for further processing."
+            )
+        else:
+            dfs.append(gdf_dgl)
+
+        crs = gdf_clc_2.crs if gdf_clc_2.crs is not None else "EPSG:25832"
+        merged_df = gpd.GeoDataFrame(pd.concat(dfs, ignore_index=True), crs=crs)
         union_geom = unary_union(merged_df.geometry)
         union_gdf = gpd.GeoDataFrame(geometry=[union_geom], crs=merged_df.crs)
         union_gdf_4326 = union_gdf.to_crs(epsg=4326)
