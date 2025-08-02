@@ -14,7 +14,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
 # Authors: Benjamin Bischke
- 
+
 import os
 import logging
 
@@ -26,11 +26,12 @@ from sentinelhub.constants import CRS
 from datetime import datetime
 from config.path_config import S2_EVALSCRIPT_FILE, L8_EVALSCRIPT_FILE
 from api.sentinelhub_downloader import SentinelHubDownloader
+from abc import ABC, abstractmethod
 
 logger = logging.getLogger("satellite_acquisition")
 
 
-class DataAcquisitionWorkflow:
+class DataAcquisitionWorkflow(ABC):
 
     def __init__(
         self,
@@ -40,7 +41,7 @@ class DataAcquisitionWorkflow:
         dwd_resource_filename,
         max_windspeed=2.6,
         min_temperature=25.0,
-        max_cloud_coverage=25,             
+        max_cloud_coverage=25,
         use_historical_data=False,
     ):
         self.path_config = path_config
@@ -49,15 +50,37 @@ class DataAcquisitionWorkflow:
         self.dwd_resource_filename = dwd_resource_filename
         self.max_windspeed = max_windspeed
         self.min_temperature = min_temperature
+        self.max_cloud_coverage = max_cloud_coverage
         self.use_historical_data = use_historical_data
 
     def run(self, override=False):
         dwd_file = self._download_dwd_climate_file(override)
         dates = self._determine_dates_from_dwd_file(dwd_file)
-        self._download_satellite_images_for_dates(dates)
+        self._download_satellite_images_for_dates(
+            dates, self.bbox, self.path_config.satellite_dir, self.max_cloud_coverage
+        )
 
-    def _download_satellite_images_for_dates():
-        raise NotImplementedError()
+    @abstractmethod
+    def _download_satellite_images_for_dates(
+        self, dates, bbox, target_dir, max_cloud_coverage
+    ):
+        """
+        Download satellite images for the given dates, bounding box and cloud coverage.
+
+        Subclasses must implement the concrete logic for a specific satellite type.
+
+        Parameters
+        ----------
+        dates:
+            An iterable of dates to fetch imagery for.
+        bbox:
+            Bounding box as (minx, miny, maxx, maxy).
+        target_dir:
+            Directory where downloaded images should be stored.
+        max_cloud_coverage:
+            Maximum allowed cloud coverage (e.g., 0.1 for 10%).
+        """
+        ...
 
     def _download_dwd_climate_file(self, override):
         current_date = datetime.now().strftime("%Y_%m_%d")
@@ -108,12 +131,14 @@ class LandsatSatelliteAcquisitionWorkflow(DataAcquisitionWorkflow):
             use_historical_data,
         )
 
-    def _download_satellite_images_for_dates(self, dates):
-        downloader = SentinelHubDownloader.create_landsat_downloader(
-            self.bbox, self.path_config.satellite_dir
-        )
+    def _download_satellite_images_for_dates(
+        self, dates, bbox, target_dir, max_cloud_coverage
+    ):
+        downloader = SentinelHubDownloader.create_landsat_downloader(bbox, target_dir)
         downloader.download_satellite_image_for_dates(
-            dates, evalscript_path=L8_EVALSCRIPT_FILE
+            requested_days=dates,
+            evalscript_path=L8_EVALSCRIPT_FILE,
+            max_cloud_coverage=max_cloud_coverage,
         )
 
 
@@ -141,10 +166,12 @@ class SentinelSatelliteAcquisitionWorkflow(DataAcquisitionWorkflow):
             use_historical_data,
         )
 
-    def _download_satellite_images_for_dates(self, dates):
-        downloader = SentinelHubDownloader.create_sentinel2_downloader(
-            self.bbox, self.path_config.satellite_dir
-        )
+    def _download_satellite_images_for_dates(
+        self, dates, bbox, target_dir, max_cloud_coverage
+    ):
+        downloader = SentinelHubDownloader.create_sentinel2_downloader(bbox, target_dir)
         downloader.download_satellite_image_for_dates(
-            dates, evalscript_path=S2_EVALSCRIPT_FILE
+            requested_days=dates,
+            evalscript_path=S2_EVALSCRIPT_FILE,
+            max_cloud_coverage=max_cloud_coverage,
         )

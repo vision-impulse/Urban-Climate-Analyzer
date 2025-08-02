@@ -102,7 +102,8 @@ class SentinelhubAPIClient:
         self,
         datafolder: str | os.PathLike[str],
         requested_days: list[str],
-        evalscript_path,
+        evalscript_path: str | os.PathLike[str],
+        max_cloud_coverage: int,
     ):
         """Download satellite images for the given days
 
@@ -121,7 +122,8 @@ class SentinelhubAPIClient:
             The default format is %Y%m%d
         """
         avaliable_days = self.get_available_days(
-            (min(requested_days), max(requested_days))
+            time_interval=(min(requested_days), max(requested_days)), 
+            max_cloud_coverage=max_cloud_coverage
         )
         usable_days = [day for day in avaliable_days if day in requested_days]
         logger.info("Requested dates for download: %s", requested_days)
@@ -134,7 +136,7 @@ class SentinelhubAPIClient:
         self,
         download_folder: str | os.PathLike[str],
         potential_dates: list[str],
-        evalscript_path: str,
+        evalscript_path: str | os.PathLike[str],
         tile_size_m: int = 10000,
     ):
         splitter = UtmZoneSplitter([self.bbox.geometry], self.bbox.crs, tile_size_m)
@@ -236,10 +238,13 @@ class SentinelHubDownloader:
         self.download_dir = os.path.join(download_dir, datacollection.name)
 
     def download_satellite_image_for_dates(
-        self, requested_days: list[str], evalscript_path: str
+        self, 
+        requested_days: list[str], 
+        evalscript_path: str, 
+        max_cloud_coverage: int
     ) -> None:
         self.sh_api.download_satellite_image_for_dates(
-            self.download_dir, requested_days, evalscript_path
+            self.download_dir, requested_days, evalscript_path, max_cloud_coverage
         )
 
     @classmethod

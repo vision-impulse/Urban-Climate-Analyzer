@@ -17,7 +17,7 @@
 
 import logging
 
-from workflows.analysis.satellite_analysis.satellite_processing_workflow import (
+from workflows.analysis.satellite_analysis.workflow import (
     LandSurfaceTemperaturProcessingWorkflow,
     VegetationIndicesProcessingWorkflow,
 )
@@ -31,7 +31,7 @@ from workflows.analysis.cold_air_detection.workflow import (
 from workflows.analysis.cold_air_with_slope_detection.workflow import (
     ColdAirZoneWithSlopeWorkflow,
 )
-from workflows.analysis.topo_flow_direction.flow_direction_extraction_workflow import (
+from workflows.analysis.topo_flow_direction.workflow import (
     FlowDirectionWorkflow,
 )
 from utils.geo_tools import get_aoi_bbox_by_city_name
