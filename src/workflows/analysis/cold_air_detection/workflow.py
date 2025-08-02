@@ -20,6 +20,7 @@ import logging
 import pandas as pd
 import geopandas as gpd
 import shutil
+import hashlib
 
 from shapely.geometry import box
 from shapely.ops import unary_union
@@ -48,7 +49,11 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         )
         self.dataset_url_dgl = dataset_url_dgl
         self.dataset_url_clc = dataset_url_clc
-        self.osm_file = os.path.join(self.datasets_dir, "osm", "osm_polygons.geojson")
+        self.osm_file = os.path.join(
+            self.datasets_dir,
+            "osm",
+            f"osm_polygons_{self._hexdigest_for_bbox(bbox_4326)}.geojson",
+        )
         self.dgl_file = os.path.join(self.datasets_dir, "dgl", "V_OD_DGL.shp")
         self.clc2_file = os.path.join(
             self.datasets_dir,
@@ -119,7 +124,7 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         if os.path.exists(output_path) and not self.override_files:
             logger.info(
                 "Cold air zones have already been computed for the requested AOI "
-                "(bbox/cityname); skipping processing." 
+                "(bbox/cityname); skipping processing."
             )
             return
         self._extract_and_merge_cold_air_zones_from_lulc_maps(output_path)
@@ -171,3 +176,7 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         bbox_gdf = gpd.GeoDataFrame(geometry=[bbox_geom], crs="EPSG:4326")
         bbox_gdf = bbox_gdf.to_crs(epsg=25832)
         return bbox_gdf
+
+    def _hexdigest_for_bbox(self, bbox):
+        bbox_str = ",".join(f"{v:.10f}" for v in bbox)
+        return hashlib.sha1(bbox_str.encode("utf-8")).hexdigest()
