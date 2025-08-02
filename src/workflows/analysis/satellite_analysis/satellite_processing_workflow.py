@@ -19,13 +19,11 @@ import os
 import rasterio
 import numpy as np
 import logging
-import shutil
 
 from workflows.analysis.satellite_analysis.satellite_processor import (
     SatelliteImageProcessor,
     SentinelProcessor,
     LandsatProcessor,
-    SensorProcessingStrategy,
 )
 from glob import glob
 from utils.geo_tools import (
@@ -38,50 +36,66 @@ from config.path_config import S2_EVALSCRIPT_FILE, L8_EVALSCRIPT_FILE
 from collections import defaultdict
 from datetime import datetime
 from rasterio.enums import Resampling
+from workflows.workflow_base import BaseWorkflow
 
 logger = logging.getLogger("satellite_workflow")
 
 
-class SatelliteWorkflow:
+class SatelliteWorkflow(BaseWorkflow):
 
     def __init__(
-        self, path_config, city, satellite_type, bbox, strategy, indices, override_files, file_suffix
+        self,
+        path_config,
+        city,
+        bbox,
+        override_files,
+        workflow_name,
+        satellite_type,
+        satellite_download_dir,
+        satellite_processing_strategy,
+        indices,
     ):
-        self.city = city
-        self.path_config = path_config
-        self.override_files = override_files
-        self.satellite_download_dir = (
-            path_config.sentinel_dir
-            if satellite_type == "sentinel"
-            else path_config.landsat_dir
+        super(SatelliteWorkflow, self).__init__(
+            city, path_config, bbox, override_files, workflow_name
         )
         self.satellite_type = satellite_type
-        self.bbox = bbox
-        self.strategy = strategy
+        self.satellite_download_dir = satellite_download_dir
+        self.strategy = satellite_processing_strategy
         self.indices = indices
-        self.file_suffix = file_suffix
-        self.downloaded_date_folders = os.listdir(self.satellite_download_dir)
-        self.processing_dir = self.path_config.processing
-        self.result_dir = self.path_config.results
-        self._cleanup_folders_for_override()
+
+        # Cleanup behavior for intermediate processing files:
+        #
+        # 1. If `override_files == True`, the base class will remove the entire workflow's processing folder.
+        #
+        # 2. The satellite image folder is never deleted, because it contains the raw input data,
+        #    which should remain unchanged across runs.
+        #
+        # 3. The "aggregates" subfolder is always deleted, because aggregation results depend on
+        #    the date and can potentially change with each new run (e.g. daily scheduled runs).
+        #
+        # Remove each "aggregates" subfolder for the specified indices.
+        for index in self.indices:
+            index_sub_folder = self._processing_folder_for_indices_aggregates(index)
+            self._remove_dir(index_sub_folder)
 
     def run(self):
-        self._merge_response_tiles_and_compute_indices()
+        self._merge_raw_satellite_tiles_and_compute_indices()
         self._compute_aggregates_from_indices()
-        self._crop_by_bbox_to_result_folder()
+        self._crop_by_bbox_and_save_in_result_folder()
 
-    def _merge_response_tiles_and_compute_indices(self):
+    def _merge_raw_satellite_tiles_and_compute_indices(self):
         logger.info("Merge response tiles and compute satellite indices")
-        for date in self.downloaded_date_folders:
+        for date_dir in os.listdir(self.satellite_download_dir):
             tile_files = glob(
-                os.path.join(self.satellite_download_dir, date) + "/*/*/response.tiff"
+                os.path.join(self.satellite_download_dir, date_dir)
+                + "/*/*/response.tiff"
             )
             if len(tile_files) == 0:
                 continue
 
             vrt_file = os.path.join(
-                self._processing_folder_for_date_images(date),
-                date + "_%s_response.vrt" % (self.satellite_type),
+                self._processing_folder_for_date_images(date_dir),
+                date_dir + "_%s_response.vrt" % (self.satellite_type),
             )
             raster_file = vrt_file.replace(".vrt", ".tiff")
 
@@ -91,7 +105,7 @@ class SatelliteWorkflow:
             processor = SatelliteImageProcessor(raster_file)
             processor.process(self.strategy, self.indices)
             for index in self.indices:
-                out_filepath = self._filepath_for_index_and_date(index, date)
+                out_filepath = self._filepath_for_index_and_date(index, date_dir)
                 processor.save_index_result_to_file(index, out_filepath)
 
     def _compute_aggregates_from_indices(
@@ -151,20 +165,15 @@ class SatelliteWorkflow:
                 with rasterio.open(out_path, "w", **meta) as dst:
                     dst.write(mean_arr.astype("float32"), 1)
 
-    def _crop_by_bbox_to_result_folder(self):
+    def _crop_by_bbox_and_save_in_result_folder(self):
         for index in self.indices:
             files_for_index = self._get_all_processed_files_for_index(index)
             for input_fp in files_for_index:
-                result_filepath = input_fp.replace(self.processing_dir, self.result_dir)
+                result_filepath = input_fp.replace(self.processing_dir, self.results_dir)
                 crop_geotiff_by_bbox(input_fp, self.bbox, result_filepath)
                 build_pyramid(result_filepath)
 
     # ---------------------------------------------------------------------------------------------------- #
-    def _cleanup_folders_for_override(self):
-        # Note: Satellite image folder (satellite_images) should never change - raw data is always the same.
-        for index in self.indices:
-            base_dir = self._get_index_base_dir(index)
-            self._remove_dir(base_dir)
 
     def _filepath_for_index_and_date(self, index, date):
         index_timestep_dir = self._processing_folder_for_indices_timesteps(index)
@@ -186,7 +195,7 @@ class SatelliteWorkflow:
         )
         self._ensure_dir(dir)
         return dir
-    
+
     def _processing_folder_for_indices_timesteps(self, index):
         dir = os.path.join(self._get_index_base_dir(index), "timesteps")
         self._ensure_dir(dir)
@@ -198,17 +207,7 @@ class SatelliteWorkflow:
         return dir
 
     def _get_index_base_dir(self, index):
-        category = "heat_islands" if index == "lst" else "vegetation_indices"
-        index_base_dir = os.path.join(self.processing_dir, self.city, category, index)
-        return index_base_dir
-
-    def _ensure_dir(self, dir):
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-    
-    def _remove_dir(self, dir_path):
-        if os.path.exists(dir_path) and os.path.isdir(dir_path):
-            shutil.rmtree(dir_path)
+        return os.path.join(self.processing_workflow_dir, index)
 
 
 class VegetationIndicesProcessingWorkflow(SatelliteWorkflow):
@@ -216,15 +215,18 @@ class VegetationIndicesProcessingWorkflow(SatelliteWorkflow):
     def __init__(self, path_config, city, bbox, override_files):
         strategy = SentinelProcessor(S2_EVALSCRIPT_FILE)
         indices = [strategy.NDVI, strategy.NDMI]
+        workflow_name = "vegetation_indices"
+        satellite_type = "sentinel"
         super(VegetationIndicesProcessingWorkflow, self).__init__(
             path_config,
             city,
-            "sentinel",
             bbox,
-            strategy,
-            indices,
             override_files,
-            file_suffix="/*sentinel_response.tiff",
+            workflow_name,
+            satellite_type,
+            path_config.sentinel_dir,
+            strategy,
+            indices
         )
 
 
@@ -233,13 +235,16 @@ class LandSurfaceTemperaturProcessingWorkflow(SatelliteWorkflow):
     def __init__(self, path_config, city, bbox, override_files):
         strategy = LandsatProcessor(L8_EVALSCRIPT_FILE)
         indices = [strategy.LST]
+        workflow_name = "heat_islands"
+        satellite_type = "landsat"
         super(LandSurfaceTemperaturProcessingWorkflow, self).__init__(
             path_config,
             city,
-            "landsat",
             bbox,
-            strategy,
-            indices,
             override_files,
-            file_suffix="/*landsat_response.tiff",
+            workflow_name,
+            satellite_type,
+            path_config.landsat_dir,
+            strategy,
+            indices
         )

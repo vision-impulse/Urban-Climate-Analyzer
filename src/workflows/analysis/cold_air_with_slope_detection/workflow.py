@@ -17,14 +17,7 @@
 
 import glob
 import os
-from enum import Enum
-from typing import Any, Union
-from urllib.parse import urljoin
-
-import pandas as pd
-import utils.date_utils as util
 import geopandas as gpd
-import pyproj
 import shutil
 import numpy as np
 import rasterio
@@ -35,25 +28,23 @@ from shapely.ops import unary_union
 from workflows.workflow_base import BaseWorkflow
 from workflows.analysis.cold_air_detection.workflow import ColdAirZoneWorkflow
 from workflows.analysis.topo_slope.workflow import SlopeExtractionWorkflow
-
+from multiprocessing import Pool
+from rasterio.mask import mask as rio_mask
+from rasterio.features import shapes
+from rasterio.errors import RasterioError
+from shapely.geometry import box
+from shapely.geometry import shape
+from shapely.ops import unary_union
 from utils.geo_tools import (
     merge_geopackages,
 )
-from multiprocessing import Pool, cpu_count
-from rasterio.mask import mask as rio_mask
-from rasterio.features import shapes
-from shapely.geometry import shape
-from shapely.ops import unary_union
-
-from rasterio.errors import RasterioError
-from shapely.geometry import box
 
 logger = logging.getLogger("cold_air_with_slope_workflow")
 
 
 class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
 
-    RESULT_FILENAME = "cold_air_zones_with_slope.gpkg"
+    RESULT_FILENAME_PREFIX = "cold_air_zones_with_slope"
 
     def __init__(
         self,
@@ -67,28 +58,16 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
         dem_scale_factor,
     ):
         super(ColdAirZoneWithSlopeWorkflow, self).__init__(
-            city, bbox, "cold_air_zones_with_slope"
+            city, path_config, bbox, override_files, "cold_air_zones_with_slope"
         )
-        self.city = city
-        self.path_config = path_config
-        self.processing_dir = path_config.processing
-        self.results_dir = path_config.results
         self.dataset_url_dgl = dataset_url_dgl
         self.dataset_url_clc = dataset_url_clc
         self.dem_folder = dem_folder
-        self.override_files = override_files
         self.dem_scale_factor = dem_scale_factor
         self.slope_degree_threshold = 2.0
         self.slope_simplify_tolerance = 0
         self.slope_min_area = 1
         self.dem_foldername = os.path.basename(self.dem_folder)
-        self.wflow_name = "cold_air_zones_with_slope"
-
-        self.process_wflow_folder = os.path.join(
-            self.processing_dir,
-            self.city,
-            self.wflow_name
-        )
 
         # input from slope workflow
         self.slope_raster_file_dir = os.path.join(
@@ -102,33 +81,25 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
         self.cold_air_mask_file = os.path.join(
             self.results_dir, self.city, "cold_air_zones", "cold_air_zones.gpkg"
         )
-        # temp processing folders
-        self.slope_vector_files_dir = os.path.join(
-            self.processing_dir,
-            self.city,
-            self.wflow_name,
-            self.dem_foldername,
-            "single_vector_files",
-        )
-        self.merged_vector_files_dir = os.path.join(
-            self.processing_dir,
-            self.city,
-            self.wflow_name,
-            self.dem_foldername,
-            "merged_files",
-        )
-        if self.override_files:
-            self._remove_dir(self.process_wflow_folder)
-            self._ensure_dir(self.process_wflow_folder)
-        self._ensure_dir(self.slope_vector_files_dir)
-        self._ensure_dir(self.merged_vector_files_dir)
-
         # Load vector mask
         self.mask_gdf = gpd.read_file(self.cold_air_mask_file)
         if self.mask_gdf.empty:
             logger.info("Mask cold air zones GPKG contains no geometries.")
-            return
 
+        # temp processing folders
+        self.slope_vector_files_dir = os.path.join(
+            self.processing_workflow_dir,
+            self.dem_foldername,
+            "single_vector_files",
+        )
+        self._ensure_dir(self.slope_vector_files_dir)
+        self.merged_vector_files_dir = os.path.join(
+            self.processing_workflow_dir,
+            self.dem_foldername,
+            "merged_files",
+        )
+        self._ensure_dir(self.merged_vector_files_dir)
+        
     def run(self):
         workflow_air_zone_analysis = ColdAirZoneWorkflow(
             self.path_config,
@@ -173,19 +144,12 @@ class ColdAirZoneWithSlopeWorkflow(BaseWorkflow):
     def _merge_vector_files_for_dataset(self):
         logger.info("Merging vector files ...")
         slope_files = glob.glob(f"{self.slope_vector_files_dir}/*slope.gpkg")
+        result_filename = f"{self.RESULT_FILENAME_PREFIX}_{self.dem_foldername}.gpkg"
         processing_output_gpkg = os.path.join(
-            self.merged_vector_files_dir, "cold_air_zones_with_slope.gpkg"
+            self.merged_vector_files_dir, result_filename
         )
         merge_geopackages(slope_files, processing_output_gpkg, unify_polygons=False)
-        dst_path = os.path.join(
-            self.results_dir,
-            self.city,
-            self.wflow_name,
-            "cold_air_zones_with_slope.gpkg",
-        )
-        result_wflow_dir = os.path.join(self.results_dir, self.city, self.wflow_name)
-        if not os.path.exists(result_wflow_dir):
-            os.makedirs(result_wflow_dir)
+        dst_path = os.path.join(self.result_workflow_dir, result_filename)
         shutil.copyfile(processing_output_gpkg, dst_path)
 
     def _create_slope_mask_gpkg_mp(self, args):

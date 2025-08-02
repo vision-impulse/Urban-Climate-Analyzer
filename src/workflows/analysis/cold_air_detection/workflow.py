@@ -18,15 +18,9 @@
 import os
 import logging
 import pandas as pd
-import requests
-import utils.date_utils as util
 import geopandas as gpd
-import pyproj
 import shutil
 
-from enum import Enum
-from typing import Any, Union
-from urllib.parse import urljoin
 from shapely.geometry import box
 from shapely.ops import unary_union
 from api.osm_downloader import OSMDownloader
@@ -49,18 +43,13 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         dataset_url_clc,
         override_files,
     ):
-
-        super(ColdAirZoneWorkflow, self).__init__(city, bbox_4326, "cold_air_zones")
-        self.city = city
+        super(ColdAirZoneWorkflow, self).__init__(
+            city, path_config, bbox_4326, override_files, "cold_air_zones"
+        )
         self.dataset_url_dgl = dataset_url_dgl
         self.dataset_url_clc = dataset_url_clc
-        self.override_files = override_files
-        self.datasets_dir = path_config.datasets
-        self.processing_dir = path_config.processing
-        self.results_dir = path_config.results
-        self.wflow_name = "cold_air_zones"
         self.osm_file = os.path.join(self.datasets_dir, "osm", "osm_polygons.geojson")
-        self.dgl_file = os.path.join(path_config.datasets, "dgl", "V_OD_DGL.shp")
+        self.dgl_file = os.path.join(self.datasets_dir, "dgl", "V_OD_DGL.shp")
         self.clc2_file = os.path.join(
             self.datasets_dir,
             "clc",
@@ -75,14 +64,6 @@ class ColdAirZoneWorkflow(BaseWorkflow):
             "clc5",
             "clc5_class3xx.shp",
         )
-        self.result_workflow = os.path.join(
-            path_config.results, self.city, self.workflow_name
-        )
-        self.processing_worklfow = os.path.join(
-            path_config.processing, self.city, self.workflow_name
-        )
-        self._ensure_dir(self.result_workflow)
-        self._ensure_dir(self.processing_worklfow)
         self.bbox_gdf = self._bbox_df_from_bounds(self.bbox)
 
     def run(self):
@@ -127,9 +108,7 @@ class ColdAirZoneWorkflow(BaseWorkflow):
             downloader.run()
 
     def _run_cold_air_zone_detection(self):
-        output_path = os.path.join(
-            self.processing_dir, self.city, self.wflow_name, self.RESULT_FILENAME
-        )
+        output_path = os.path.join(self.processing_workflow_dir, self.RESULT_FILENAME)
         if os.path.exists(output_path) and not self.override_files:
             logger.info("Cold air zones already computed, skipping computation")
             return
@@ -166,16 +145,8 @@ class ColdAirZoneWorkflow(BaseWorkflow):
         union_gdf_4326.to_file(output_path, layer="cold_area_zones", driver="GPKG")
 
     def _copy_from_processing_to_result_dir(self):
-        src_path = os.path.join(
-            self.processing_dir, self.city, self.wflow_name, self.RESULT_FILENAME
-        )
-        dst_path = os.path.join(
-            self.results_dir, self.city, self.wflow_name, self.RESULT_FILENAME
-        )
-        if not os.path.exists(
-            os.path.join(self.results_dir, self.city, self.wflow_name)
-        ):
-            os.makedirs(os.path.join(self.results_dir, self.city, self.wflow_name))
+        src_path = os.path.join(self.processing_workflow_dir, self.RESULT_FILENAME)
+        dst_path = os.path.join(self.result_workflow_dir, self.RESULT_FILENAME)
         shutil.copyfile(src_path, dst_path)
 
     def _bbox_df_from_bounds(self, bbox_bounds_4326):

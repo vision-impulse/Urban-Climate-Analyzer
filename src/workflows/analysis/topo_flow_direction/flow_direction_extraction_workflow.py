@@ -19,7 +19,7 @@ import os
 import glob
 import logging
 
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 
 from workflows.workflow_base import BaseWorkflow
 from workflows.analysis.topo_flow_direction.flow_direction import (
@@ -44,64 +44,40 @@ class FlowDirectionWorkflow(BaseWorkflow):
         override_files,
         gsd_grids_in_meter=None,
     ):
-        super(FlowDirectionWorkflow, self).__init__(city, bbox, "flow_direction")
-        logger.info("Processing DEM folder %s", dem_folder)
-        self.path_config = path_config
-        self.city = city
-        self.dem_scale_factor = dem_scale_factor
-        self.override_files = override_files
-        self.gsd_grids_in_meter = gsd_grids_in_meter or [50, 100]
-        self.dem_folder = dem_folder
-        self.dem_filename = os.path.basename(self.dem_folder)
-        self.processing_folder = path_config.processing
-        self.wflow_name = "flow_direction"
-        self.process_wflow_folder = os.path.join(
-            self.processing_folder,
-            self.city,
-            self.wflow_name
+        super(FlowDirectionWorkflow, self).__init__(
+            city, path_config, bbox, override_files, "flow_direction"
         )
-
-        # Result dir
-        self.result_dir = os.path.join(path_config.results, self.city, self.wflow_name)
+        logger.info("Processing DEM folder %s", dem_folder)
+        self.dem_folder = dem_folder
+        self.dem_scale_factor = dem_scale_factor
+        self.gsd_grids_in_meter = gsd_grids_in_meter or [50, 100]
+        self.dem_filename = os.path.basename(self.dem_folder)
 
         # Temp dirs for local processing
         self.processing_raster_dir = os.path.join(
-            self.processing_folder,
-            self.city,
-            self.wflow_name,
+            self.processing_workflow_dir,
             self.dem_filename,
             "single_raster_files",
         )
+        self._ensure_dir(self.processing_raster_dir)
         self.processing_vector_dir = os.path.join(
-            self.processing_folder,
-            self.city,
-            self.wflow_name,
+            self.processing_workflow_dir,
             self.dem_filename,
             "single_vector_files",
         )
+        self._ensure_dir(self.processing_vector_dir)
         self.processing_merge_dir = os.path.join(
-            self.processing_folder,
-            self.city,
-            self.wflow_name,
+            self.processing_workflow_dir,
             self.dem_filename,
             "merged_files",
         )
-        self._setup_workflow_dirs()
+        self._ensure_dir(self.processing_merge_dir)
 
     def run(self):
         self._extract_flow_direction_for_dem_files()
         self._aggregate_raster_directions_to_vector_grid()
         self._merge_vector_files_for_dataset()
         self._crop_by_bbox_and_copy_gpkg()
-
-    def _setup_workflow_dirs(self):
-        self._ensure_dir(self.result_dir)
-        if self.override_files:
-            self._remove_dir(self.process_wflow_folder)
-            self._ensure_dir(self.process_wflow_folder)
-        self._ensure_dir(self.processing_raster_dir)
-        self._ensure_dir(self.processing_vector_dir)
-        self._ensure_dir(self.processing_merge_dir)
 
     def _extract_flow_direction_for_dem_files(self):
         logger.info(
@@ -161,7 +137,7 @@ class FlowDirectionWorkflow(BaseWorkflow):
             gt.crop_gpkg_by_bbox(
                 output_gpkg_fp,
                 f"flow_direction_{gsd}",
-                self.result_dir,
+                self.result_workflow_dir,
                 self.bbox,
                 f"flow_direction_{gsd}_{self.dem_filename}.gpkg",
             )
