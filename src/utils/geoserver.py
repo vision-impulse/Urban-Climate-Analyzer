@@ -18,6 +18,8 @@
 import geopandas as gpd
 import os
 import logging
+import requests
+import re
 
 from geo.Geoserver import Geoserver
 from requests.auth import HTTPBasicAuth
@@ -29,19 +31,36 @@ class GeoServer(object):
 
     def __init__(
         self,
-        workspace_name,
-        workspace_host,
-        workspace_port,
+        geoserver_workspace_name,
+        geoserver_host,
+        geoserver_port,
         geoserver_admin,
         geoserver_password,
+        postgis_user,
+        postgis_password,
+        postgis_db,
+        postgis_port,
     ):
-        self.workspace_name = workspace_name
+        self.workspace_name = geoserver_workspace_name
+        self.geoserver_admin = geoserver_admin
+        self.geoserver_password = geoserver_password
+        self.postgis_user = postgis_user
+        self.postgis_password = postgis_password
+        self.postgis_db = postgis_db
+        self.postgis_port = postgis_port
+        self.postgis_host = "postgis" # Docker hostname!
         self.srv = Geoserver(
-            "http://%s:%s/geoserver" % (workspace_host, workspace_port),
+            "http://%s:%s/geoserver" % (geoserver_host, geoserver_port),
             username=geoserver_admin,
             password=geoserver_password,
         )
+        self.geoserver_rest_url = "http://%s:%s/geoserver/rest" % (
+            geoserver_host,
+            geoserver_port,
+        )
+        self.datastore_name = "POSTGIS_STORE"
         self._setup_workspace()
+        self._create_datastore(self.datastore_name)
 
     def create_styles(self, style_files):
         for fp in style_files:
@@ -57,16 +76,22 @@ class GeoServer(object):
                 layer_name=layer_name, path=fp, workspace=self.workspace_name
             )
 
-    def publish_geopackages(self, geopackages, layer_name_suffix=None):
-        for geopackage in geopackages:
-            # BB caution: shapefile path during upload has to match the path inside the geoserver docker component
-            geopackage = geopackage.replace("./../data/", "/data/")
-            layer_name = os.path.basename(geopackage).replace(".gpkg", "")
-            if layer_name_suffix is not None:
-                layer_name = layer_name_suffix + layer_name
-            self.srv.create_gpkg_datastore(
-                path=geopackage, store_name=layer_name, workspace=self.workspace_name
-            )
+    def publish_featurestore_layer(self, table_name):
+        layers = self.srv.get_layers()
+        layer_exists = False
+        if layers["layers"] != "":
+            for wl in layers["layers"]["layer"]:
+                if wl["name"] == "%s:%s" % (self.workspace_name, table_name):
+                    layer_exists = True
+                    break
+        if layer_exists:
+            self.srv.delete_layer(layer_name=table_name, workspace=self.workspace_name)
+        self.srv.publish_featurestore(
+            workspace=self.workspace_name,
+            store_name=self.datastore_name,
+            pg_table=table_name,
+        )
+        logger.info("Published featurestore from table: %s", table_name)
 
     # --------------------------------------------------------------------------------------------------- #
     def _setup_workspace(self):
@@ -130,12 +155,11 @@ class GeoServer(object):
         logger.info(f"Upload style {style_name}")
         self.srv.upload_style(path=style_fp, workspace=self.workspace_name)
 
-    def apply_style_to_named_layer(self, named_layer, style_name):
+    def apply_style_to_named_layer(self, named_layer_pattern, style_name):
         layers = self.srv.get_layers()
-        layer_exists = False
         if layers["layers"] != "":
             for w in layers["layers"]["layer"]:
-                if named_layer in w["name"]:
+                if re.search(named_layer_pattern, w["name"]):
                     name = w["name"].replace(self.workspace_name + ":", "")
                     logger.info(f"Publish layer {name} with style {style_name}")
                     self.srv.publish_style(
@@ -143,3 +167,35 @@ class GeoServer(object):
                         style_name=style_name,
                         workspace=self.workspace_name,
                     )
+
+    def _create_datastore(self, datastore_name):
+        datastores = self.srv.get_datastores()
+        datastore_exists = False
+        if datastores["dataStores"] != "":
+            for w in datastores["dataStores"]["dataStore"]:
+                if w["name"] == datastore_name:
+                    datastore_exists = True
+                    break
+        if datastore_exists:
+            return 
+        datastore_xml = f"""
+            <dataStore>
+            <name>{datastore_name}</name>
+            <connectionParameters>
+                <host>{self.postgis_host}</host>
+                <port>{self.postgis_port}</port>
+                <database>{self.postgis_db}</database>
+                <user>{self.postgis_user}</user>
+                <passwd>{self.postgis_password}</passwd>
+                <dbtype>postgis</dbtype>
+                <schema>public</schema>
+            </connectionParameters>
+            </dataStore>
+            """
+        r = requests.post(
+            f"{self.geoserver_rest_url}/workspaces/{self.workspace_name}/datastores",
+            headers={"Content-Type": "text/xml"},
+            data=datastore_xml,
+            auth=HTTPBasicAuth(self.geoserver_admin, self.geoserver_password),
+        )
+        logger.info(f"Created datastore: %s  (%s)", datastore_name, r.status_code)

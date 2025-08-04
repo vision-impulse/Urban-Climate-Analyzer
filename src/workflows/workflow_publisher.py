@@ -15,11 +15,13 @@
 #
 # Authors: Benjamin Bischke
 
-from utils.geoserver import GeoServer
-from config.path_config import PathConfig
+import geopandas as gpd
 import glob
 import os
 
+from utils.geoserver import GeoServer
+from utils.postgis_importer import PostGisImporter
+from config.path_config import PathConfig
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,6 +33,11 @@ GEOSERVER_WORKSPACE = os.getenv("GEOSERVER_WORKSPACE")
 GEOSERVER_HOST = os.getenv("GEOSERVER_HOST", "geoserver")
 GEOSERVER_PORT = os.getenv("GEOSERVER_PORT", 8080)
 
+POSTGRES_USER = os.getenv("POSTGRES_USER")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")
+POSTGRES_DB = os.getenv("POSTGRES_DB")
+POSTGRES_PORT = os.getenv("POSTGRES_PORT")
+
 
 class WorkflowPublisher:
 
@@ -41,16 +48,23 @@ class WorkflowPublisher:
         self.app_config = app_config
         self.city_config = city_config
         self.override_files = args.override
+        self.layer_name_suffix = f"{self.city_name}_"
         self.path_config = PathConfig(app_config["output_data_dir"])
+        self.result_dir = self.path_config.results
         self.server = GeoServer(
             GEOSERVER_WORKSPACE,
-            GEOSERVER_HOST,
+            "geoserver",
             GEOSERVER_PORT,
             GEOSERVER_ADMIN_USER,
             GEOSERVER_ADMIN_PASSWORD,
+            POSTGRES_USER,
+            POSTGRES_PASSWORD,
+            POSTGRES_DB,
+            POSTGRES_PORT,
         )
-        self.result_folder = self.path_config.results
-        self.layer_name_suffix = f"{self.city_name}_"
+        self.db_importer = PostGisImporter(
+            POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_PORT
+        )
 
     def run(self):
         self._upload_styles()
@@ -82,51 +96,54 @@ class WorkflowPublisher:
         self.server.create_styles(styles)
 
     def publish_lst_files(self):
-        lst_folder = os.path.join(self.result_folder, self.city_name, "heat_islands")
+        lst_folder = os.path.join(self.result_dir, self.city_name, "heat_islands")
         tif_files = glob.glob(os.path.join(lst_folder, "**", "*.tiff"), recursive=True)
         self.server.publish_images(tif_files, layer_name_suffix=self.layer_name_suffix)
-        self.server.apply_style_to_named_layer("lst_", f"{GEOSERVER_WORKSPACE}:lst")
+        named_layer_pattern = rf"\b{GEOSERVER_WORKSPACE}:{self.city_name}_lst_"
+        self.server.apply_style_to_named_layer(named_layer_pattern, f"{GEOSERVER_WORKSPACE}:lst")
 
     def publish_vegetation_files(self):
-        veg_folder = os.path.join(
-            self.result_folder, self.city_name, "vegetation_indices"
-        )
+        veg_folder = os.path.join(self.result_dir, self.city_name, "vegetation_indices")
         tif_files = glob.glob(os.path.join(veg_folder, "**", "*.tiff"), recursive=True)
         self.server.publish_images(tif_files, layer_name_suffix=self.layer_name_suffix)
-        self.server.apply_style_to_named_layer("ndvi_", f"{GEOSERVER_WORKSPACE}:ndvi")
-        self.server.apply_style_to_named_layer("ndmi_", f"{GEOSERVER_WORKSPACE}:ndmi")
+        named_layer_pattern = rf"\b{GEOSERVER_WORKSPACE}:{self.city_name}_ndvi_"
+        self.server.apply_style_to_named_layer(named_layer_pattern, f"{GEOSERVER_WORKSPACE}:ndvi")
+        named_layer_pattern = rf"\b{GEOSERVER_WORKSPACE}:{self.city_name}_ndmi_"
+        self.server.apply_style_to_named_layer(named_layer_pattern, f"{GEOSERVER_WORKSPACE}:ndmi")
 
     def publish_cold_air_files(self):
         cold_air_zone_file = os.path.join(
-            self.result_folder, self.city_name, "cold_air_zones", "cold_air_zones.gpkg"
+            self.result_dir, self.city_name, "cold_air_zones", "cold_air_zones.gpkg"
         )
-        self.server.publish_geopackages(
-            [cold_air_zone_file], layer_name_suffix=self.layer_name_suffix
-        )
-        self.server.apply_style_to_named_layer(
-            "cold_area_zones", f"{GEOSERVER_WORKSPACE}:cold"
-        )
+        self._publish_geopackage(cold_air_zone_file)
+        named_layer_pattern = rf"\b{GEOSERVER_WORKSPACE}:{self.city_name}_cold_air_zones\b"
+        self.server.apply_style_to_named_layer(named_layer_pattern, f"{GEOSERVER_WORKSPACE}:cold")
 
     def publish_cold_air_files_with_slope(self):
-        cold_air_zone_file = os.path.join(
-            self.result_folder,
+        cold_air_zone_slope_file = os.path.join(
+            self.result_dir,
             self.city_name,
             "cold_air_zones_with_slope",
             "cold_air_zones_with_slope.gpkg",
         )
-        self.server.publish_geopackages(
-            [cold_air_zone_file], layer_name_suffix=self.layer_name_suffix
-        )
-        self.server.apply_style_to_named_layer(
-            "cold_air_zones_with_slope", f"{GEOSERVER_WORKSPACE}:cold_slope"
-        )
+        self._publish_geopackage(cold_air_zone_slope_file)
+        named_layer_pattern = rf"\b{GEOSERVER_WORKSPACE}:{self.city_name}_cold_air_zones_with_slope"
+        self.server.apply_style_to_named_layer(named_layer_pattern, f"{GEOSERVER_WORKSPACE}:cold_slope")
+        
 
     def publish_air_flow_files(self):
-        veg_folder = os.path.join(self.result_folder, self.city_name, "flow_direction")
+        veg_folder = os.path.join(self.result_dir, self.city_name, "flow_direction")
         gpkg_files = glob.glob(os.path.join(veg_folder, "**", "*.gpkg"), recursive=True)
-        self.server.publish_geopackages(
-            gpkg_files, layer_name_suffix=self.layer_name_suffix
+        for gpkg_file in gpkg_files:
+            self._publish_geopackage(gpkg_file)
+        named_layer_pattern = rf"\b{GEOSERVER_WORKSPACE}:{self.city_name}_flow_direction"
+        self.server.apply_style_to_named_layer(named_layer_pattern, f"{GEOSERVER_WORKSPACE}:flow_direction")
+
+    def _publish_geopackage(self, geopackage_fp):
+        tablename = (
+            self.city_name + "_" + os.path.basename(geopackage_fp).replace(".gpkg", "")
         )
-        self.server.apply_style_to_named_layer(
-            "flow_direction", f"{GEOSERVER_WORKSPACE}:flow_direction"
-        )
+        geopackage_fp = geopackage_fp.replace("./../data", "/data")
+
+        self.db_importer.import_gdf_to_postgis_table(geopackage_fp, tablename)
+        self.server.publish_featurestore_layer(tablename)

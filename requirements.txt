@@ -54,3 +54,6 @@ utm==0.8.1
 wheel==0.45.1
 whitebox==2.3.6
 geoserver-rest==2.9.1
+psycopg2==2.9.10
+SQLAlchemy==2.0.42
+GeoAlchemy2==0.18.0

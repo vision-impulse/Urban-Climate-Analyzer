@@ -17,11 +17,31 @@
 
 services:
 
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: uca_postgis
+    hostname: postgis
+    restart: "on-failure"
+    expose:
+      - "${POSTGRES_PORT}"
+    volumes:
+      - ./data/components/database/data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    env_file:
+      - .env 
+    networks:
+      - ucanet
+
   geoserver:
     image: docker.osgeo.org/geoserver:2.26.2
     container_name: uca_geoserver
     hostname: geoserver
-    ports:   # BB: only for local testing, for production use 'expose'!
+    expose:
+      - "${GEOSERVER_PORT}"
+    ports:   # BB: publishes to localhost - only for local testing, comment in production!
       - "${GEOSERVER_PORT}:${GEOSERVER_PORT}"
     environment:
       - EXTRA_JAVA_OPTS=-Xms8G -Xmx16G
