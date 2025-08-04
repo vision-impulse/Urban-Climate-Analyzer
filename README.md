@@ -48,7 +48,7 @@ Die Konfiguration des Analyse-Tools erfolgt in drei Ebenen:
 
 ## Konfiguration der API-Zugangsdaten
 
-Sensible Informationen, wie API-Zugangsdaten und GeoServer-Zugriffe, werden in einer .env-Datei gepflegt.
+Sensible Informationen, wie API-Zugangsdaten und Zugriffe auf den GeoServer sowie die PostGIS-Datenbank, werden in einer .env-Datei gepflegt.
 
 Beispiel ```.env```:
 ```
@@ -56,16 +56,23 @@ Beispiel ```.env```:
 SH_CLIENT_ID=your_client_id_here
 SH_CLIENT_SECRET=your_client_secret_here
 
-# Zugangsdaten für die Authentifizierung am GeoServer
+# Zugangsdaten für die Authentifizierung am GeoServer (Optional, nicht benötigt zur Analyse)
 GEOSERVER_ADMIN_USER=admin
 GEOSERVER_ADMIN_PASSWORD=your_password_here
 GEOSERVER_PORT=8080
 GEOSERVER_WORKSPACE=urban_climate_workspace
+GEOSERVER_HOST=geoserver
+
+# Zugangsdaten für die Authentifizierung an der PostGIS-DB (Optional, nicht benötigt zur Analyse)
+POSTGRES_USER=postgres_user
+POSTGRES_PASSWORD=postgres_password
+POSTGRES_DB=UCA_DB
+POSTGRES_PORT=5432
 ```
 
 Hinweis: Wenn Satellitendaten von Sentinel bezogen werden sollen, ist ein aktives Konto bei Sentinel Hub erforderlich.
 
-## Konfiguration je Untersuchungsgebiet (config/<stadt>.yaml)
+## Konfiguration je Untersuchungsgebiet ('config/stadt.yaml')
 
 Für jede Stadt oder jedes Untersuchungsgebiet wird eine eigene Konfigurationsdatei benötigt. Diese Datei enthält sämtliche projektspezifischen Einstellungen wie z. B. Geometrien, Datenquellen oder lokale Pfade. Dadurch wird eine modulare und wiederholbare Analyse verschiedener Kommunen ermöglicht.
 
@@ -146,9 +153,10 @@ pip install -r requirements.txt
 
 ### Ausführung
 
-Das Tool wird über das Python-Skript main.py aufgerufen und benötigt mindestens den Namen der Stadt (bzw. den Namen der Konfigurationsdatei) sowie eines oder mehrerer Module, die ausgeführt werden sollen.
+Das Tool wird über das Python-Skript main.py im Ordner 'src' aufgerufen und benötigt mindestens den Namen der Stadt (bzw. den Namen der Konfigurationsdatei) sowie eines oder mehrerer Module, die ausgeführt werden sollen.
 
 ```
+cd src/
 python main.py --city <STADT> [OPTIONEN] --modules <MODULNAME>
 ```
 
@@ -197,26 +205,36 @@ Führt alle Module aus, inklusive: Historischer Wetterdatenverarbeitung, Upload 
 
 ## Ausführung im Docker Container
 
-Das Tool kann auch innerhalb eines Docker-Containers ausgeführt werden – ideal für reproduzierbare, isolierte Analysen und zur Kombination mit dem GeoServer in einer docker compose-Umgebung.
+Das Tool kann auch innerhalb eines Docker-Containers ausgeführt werden. Sofern ein Hosting der Analyseergebnisse in einer GeoServer- und DatenbankInstanz erwünscht sind, ist Ausführung der über docker compose zwingend notwendig. 
 
 ### Aufruf der Analyse im Container
+
+Die Analyse kann wie im lokalen Beispiel, jedoch isoliert im Container ausgeführt werden (z. B. für Kaltluftentstehungsgebiete):
 ```
 docker compose run --rm --build climate_analysis python main.py --city paderborn --modules cold
 ```
-
-Alternativ, ohne Rebuild des Containers:
+Alternativ, ohne das Image neu zu bauen:
 ```
 docker compose run --rm climate_analysis python main.py --city paderborn --modules lst,cold,flow
 ```
 Hinweis: Das --build-Flag sorgt dafür, dass das Docker-Image vor der Ausführung neu gebaut wird.
 
-### GeoServer starten (falls Ergebnisse bereitgestellt werden sollen)
-Falls die Ergebnisse per GeoServer bereitgestellt werden sollen, muss der Dienst vorher gestartet werden:
 
+### Aufruf der Analyse im Container für die Bereitstellung in Geoserver und PostGIS
+
+Falls die Ergebnisse per GeoServer und PostGIS bereitgestellt werden sollen, müssen diese Dienste zuerst gestartet werden:
 ```
-docker compose up -d --build geoserver
+docker compose up -d --build geoserver postgis
 ```
-Dadurch wird die GeoServer-Instanz im Hintergrund gestartet und ist anschließend unter http://localhost:8080/geoserver erreichbar (sofern nicht anders konfiguriert).
+Dadurch werden die PostGIS-Datenbank und die GeoServer-Instanz im Hintergrund gestartet. Der GeoServer ist anschließend unter http://localhost:8080/geoserver erreichbar (sofern nicht anders konfiguriert).
+
+Anschließend kann die Analyse im Docker-Container durchgeführt werden. Mit der Option 'upload_to_geoserver' werden die Ergebnisdaten im Geoserver veröffentlicht: 
+```
+docker compose run --rm climate_analysis python main.py --city paderborn --modules lst --upload_to_geoserver 
+```
+
+Hinweis: Die Analyse kann bereits vorab ausgeführt werden (lokal oder im Docker container). Mit der Option --upload_to_geoserver lassen sich vorhandene Ergebnisse nachträglich veröffentlichen.
+
 
 # Struktur der Dateiordner:
 
@@ -230,10 +248,12 @@ rustuls/
 └── city_name/
     ├── cold_air_zones/
     │   ├── cold_air_zones.gpkg
+    │
+    ├── cold_air_zones_with_slope/
     │   └── cold_air_zones_with_slope.gpkg
     │
     ├── flow_direction/
-    │   └── flow_direction.gpkg
+    │   └── flow_direction_100_dir_name_dem.gpkg
     │
     ├── heat_islands/
     │   └── lst/
