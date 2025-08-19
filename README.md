@@ -86,7 +86,8 @@ data_sources:
   dwd_weatherstation_filename_recent: "tageswerte_KL_03028_akt.zip"       # Aktuelle Wetterdaten DWD
   dwd_weatherstation_filename_historical: "tageswerte_KL_03028_19510101_20241231_hist.zip"  # Historische Wetterdaten
   local_dem_data_dirs: 
-    - "/data/dgm"                    # Lokale Pfade zu topografischen Daten (DGM/DOM)
+    - "/data/dgm"                    # Lokaler Pfad zu topografischen Daten (DGM)
+    - "/data/dom"                    # Lokaler Pfad zu topografischen Daten (DOM)
 ```
 
 Pflichtangaben je Stadt:
@@ -95,9 +96,12 @@ Pflichtangaben je Stadt:
     - oder alternativ per Bounding Box (Koordinaten in EPSG:4326, nicht im obigen Beispiel enthalten)
 
 Ooptionale Angaben, aber erforderlich für bestimmte Module je Stadt:
-- Wetterstation: Angabe der DWD-Station (z. B. 03028 für Paderborn) mit dazugehörigen Datendateien sofern Satellitenbilder ausgewertet sollen (Modul Hitzinseln und Vegetationsindices)
-- Topografie (optional, aber erforderlich für bestimmte Module):
-    Pfade zum Digitalen Höhenmodell (DHM) und/oder Digitalen Geländemodell (DGM), falls Module wie Fließrichtung oder Kaltluft mit Hangneigung verwendet werden sollen
+- Wetterstation: Angabe der DWD-Station (z.B. 03028 für Paderborn) mit dazugehörigen Datendateien sofern Satellitenbilder ausgewertet sollen (relevant für die Module Hitzinseln und Vegetationsindices)
+- Topografie (optional, aber erforderlich für bestimmte Module): Für Module wie Fließrichtung, Kaltluftmodellierung oder Hangneigung ist die Angabe von Höhendaten erforderlich. Diese können in Form eines Digitalen Höhenmodells (DHM/DOM) oder eines Digitalen Geländemodells (DGM) über lokale Ordner eingebunden werden.
+  - Anforderungen an die Daten: Format: GeoTIFF-Dateien (*.tif)
+  - Kachelung: Das Untersuchungsgebiet kann durch mehrere Kacheln abgedeckt werden (beliebige Größe, z.B. 1x1 km Kachelraster).
+  - Koordinatenreferenzsystem: Es muss ein metrisches CRS verwendet werden (horizontale und vertikale Einheiten = Meter), z.B.: UTM Zone 32N, EPSG:25832
+  - Konfiguration (local_dem_data_dirs): Es können mehrere Verzeichnisse angegeben werden, falls unterschiedliche Höhendatensätze verwendet werden (z.B. DOM und DGM). Jedes Verzeichnis wird in einer separaten Zeile unter local_dem_data_dirs angegeben ('- Pfad zum Ordner mit den GeoTIFF-Kacheln'):
 
 
 ## Globale Konfiguration des Tools(app.config)
